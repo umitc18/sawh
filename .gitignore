@@ -1,0 +1,61 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# AMBuild / Build Folders
+build/
+.ambuild/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs
+.vscode/
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Dependencies
+
+deps/
+
+# Env just for me
+
+ambuild-env/
