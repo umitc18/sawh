@@ -1,0 +1,11 @@
+{
+    "name": "sawh",
+    "alias": "sawh",
+    "display_name": "Simple Anti Wallhack",
+    "description": "Grid based visibility checker",
+    "author": "umitc18",
+    "url": "http://www.sourcemm.net/",
+    "log_tag": "SAWH",
+    "license": "MIT",
+    "version": "1.0.0.{{git-shorthash}}"
+}
