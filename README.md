@@ -1,5 +1,7 @@
 # CS2 Simple Anti-Wallhack (SAWH)
 
+![preview](https://github.com/umitc18/sawh/blob/main/assets/test.gif)
+
 Simple Anti-Wallhack (SAWH) is a server-side Metamod:Source plugin designed for Counter-Strike 2. Its primary goal is to prevent Wallhack (ESP) cheats by transmitting player data only when players are physically visible to each other on the map. It utilizes precomputed visibility data (JSON) mapped to the game's radar coordinates to determine line-of-sight efficiently.
 
 ## Features
