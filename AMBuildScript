@@ -114,10 +114,10 @@ class MMSPluginConfig(object):
       'display_name': 'Simple Anti Wallhack',
       'description': 'Grid based visibility checker',
       'author': 'umitc18',
-      'url': 'http://www.sourcemm.net/',
+      'url': 'https://github.com/umitc18/sawh',
       'log_tag': 'SAWH',
       'license': 'MIT',
-      'version': '0.1.0.{{git-shorthash}}',
+      'version': '0.2.0.{{git-shorthash}}',
     }
 
     if builder.options.targets:

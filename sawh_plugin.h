@@ -36,9 +36,8 @@ private:
 	float cell_size;
 	int map_width = 32;
 	int map_height = 32;
-	
-	// Precomputed visibility map: key = (x << 16) | y, value = vector of visible keys
-	std::unordered_map<int, std::vector<int>> visibility_grid;
+
+	std::vector<bool> visibility_grid;
 };
 
 extern SAWHPlugin g_SAWHPlugin;

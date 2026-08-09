@@ -266,26 +266,34 @@ void SAWHPlugin::LoadMapData(const std::string& mapName)
 
 	visibility_grid.clear();
 
+	int total_cells = map_width * map_height;
+	visibility_grid.assign(total_cells * total_cells, false);
+
 	if (data.contains("zones"))
 	{
 		for (const auto& zone : data["zones"])
 		{
 			int zx = zone.value("x", 0);
 			int zy = zone.value("y", 0);
-			int key = (zx << 16) | (zy & 0xFFFF);
+			
+			if (zx < 0 || zx >= map_width || zy < 0 || zy >= map_height) continue;
+			int obs_index = zy * map_width + zx;
 
-			std::vector<int> visible_cells;
 			if (zone.contains("cansee"))
 			{
 				for (const auto& see : zone["cansee"])
 				{
 					int sx = see.value("x", 0);
 					int sy = see.value("y", 0);
-					visible_cells.push_back((sx << 16) | (sy & 0xFFFF));
+					
+					if (sx < 0 || sx >= map_width || sy < 0 || sy >= map_height) continue;
+					
+					int tgt_index = sy * map_width + sx;
+					int global_index = obs_index * total_cells + tgt_index;
+					
+					visibility_grid[global_index] = true;
 				}
 			}
-
-			visibility_grid[key] = visible_cells;
 		}
 	}
 
@@ -316,18 +324,25 @@ void SAWHPlugin::CalculateGrid(float x, float y, int& grid_x, int& grid_y)
 
 bool SAWHPlugin::IsVisible(int observer_x, int observer_y, int target_x, int target_y)
 {
-	int obs_key = (observer_x << 16) | (observer_y & 0xFFFF);
-	int tgt_key = (target_x << 16) | (target_y & 0xFFFF);
-
-	auto it = visibility_grid.find(obs_key);
-	if (it != visibility_grid.end())
+	if (observer_x < 0 || observer_x >= map_width || observer_y < 0 || observer_y >= map_height ||
+	    target_x < 0 || target_x >= map_width || target_y < 0 || target_y >= map_height)
 	{
-		const auto& visible_cells = it->second;
-		for (int cell : visible_cells)
-		{
-			if (cell == tgt_key)
-				return true;
-		}
+		return false;
+	}
+
+	if (visibility_grid.empty())
+	{
+		return false;
+	}
+
+	int total_cells = map_width * map_height;
+	int obs_index = observer_y * map_width + observer_x;
+	int tgt_index = target_y * map_width + target_x;
+	int global_index = obs_index * total_cells + tgt_index;
+
+	if (global_index >= 0 && global_index < visibility_grid.size())
+	{
+		return visibility_grid[global_index];
 	}
 
 	return false;
@@ -377,9 +392,26 @@ void SAWHPlugin::Hook_CheckTransmit(CCheckTransmitInfo **pInfoInfoList, int nInf
 	}
 
 	g_SAWHTickCount++;
-	bool bShouldLog = false;//(g_SAWHTickCount % 128 == 0);
+	bool bShouldLog = (g_SAWHTickCount % 128 == 0);
 
 	SAWH_ResolveOffsetsOnce();
+
+	struct PlayerCache {
+		bool bValid = false;
+		int grid_x = 0;
+		int grid_y = 0;
+		Vector origin;
+		int pawnIndex = -1;
+		void* pPawn = nullptr;
+	};
+	PlayerCache tickCache[65];
+
+	for (int i = 1; i <= 64; ++i) {
+		if (SAWH_GetPawnOriginForController(pGameEntitySystem, i, tickCache[i].origin, tickCache[i].pawnIndex, tickCache[i].pPawn)) {
+			tickCache[i].bValid = true;
+			CalculateGrid(tickCache[i].origin.x, tickCache[i].origin.y, tickCache[i].grid_x, tickCache[i].grid_y);
+		}
+	}
 
 	for (int i = 0; i < nInfoCount; i++)
 	{
@@ -387,23 +419,20 @@ void SAWHPlugin::Hook_CheckTransmit(CCheckTransmitInfo **pInfoInfoList, int nInf
 		if (!pInfo || !pInfo->m_pTransmitEntity)
 			continue;
 
-		// playerslot offset 576?
 		int iPlayerSlot = (int)*((uint8*)pInfo + 576);
 		int observerSlot = iPlayerSlot;
 		int observerControllerIndex = observerSlot + 1;
 
-		Vector observerOrigin;
-		int observerPawnIndex = -1;
-		void* pObserverPawn = nullptr;
-		if (!SAWH_GetPawnOriginForController(pGameEntitySystem, observerControllerIndex, observerOrigin, observerPawnIndex, pObserverPawn))
+		if (!tickCache[observerControllerIndex].bValid)
 			continue;
 
-		int obs_grid_x, obs_grid_y;
-		CalculateGrid(observerOrigin.x, observerOrigin.y, obs_grid_x, obs_grid_y);
+		int obs_grid_x = tickCache[observerControllerIndex].grid_x;
+		int obs_grid_y = tickCache[observerControllerIndex].grid_y;
 
 		if (bShouldLog)
 		{
-			META_CONPRINTF("[SAWH] PLAYER %d: WORLD[%.1f, %.1f, %.1f] -> GRID[%d, %d]\n", observerControllerIndex, observerOrigin.x, observerOrigin.y, observerOrigin.z, obs_grid_x, obs_grid_y);
+			META_CONPRINTF("[SAWH] PLAYER %d: WORLD[%.1f, %.1f, %.1f] -> GRID[%d, %d]\n", 
+				observerControllerIndex, tickCache[observerControllerIndex].origin.x, tickCache[observerControllerIndex].origin.y, tickCache[observerControllerIndex].origin.z, obs_grid_x, obs_grid_y);
 		}
 
 		for (int targetSlot = 0; targetSlot < 64; ++targetSlot)
@@ -412,17 +441,13 @@ void SAWHPlugin::Hook_CheckTransmit(CCheckTransmitInfo **pInfoInfoList, int nInf
 
 			int targetControllerIndex = targetSlot + 1;
 
-			Vector targetOrigin;
-			int targetPawnIndex = -1;
-			void* pTargetPawn = nullptr;
-			if (!SAWH_GetPawnOriginForController(pGameEntitySystem, targetControllerIndex, targetOrigin, targetPawnIndex, pTargetPawn))
+			if (!tickCache[targetControllerIndex].bValid)
 				continue;
 
-			// if (!pInfo->m_pTransmitEntity->IsBitSet(targetPawnIndex))
-			//	continue;
-
-			int tgt_grid_x, tgt_grid_y;
-			CalculateGrid(targetOrigin.x, targetOrigin.y, tgt_grid_x, tgt_grid_y);
+			int tgt_grid_x = tickCache[targetControllerIndex].grid_x;
+			int tgt_grid_y = tickCache[targetControllerIndex].grid_y;
+			int targetPawnIndex = tickCache[targetControllerIndex].pawnIndex;
+			void* pTargetPawn = tickCache[targetControllerIndex].pPawn;
 
 			bool isVis = IsVisible(obs_grid_x, obs_grid_y, tgt_grid_x, tgt_grid_y);
 
@@ -442,7 +467,7 @@ const char *SAWHPlugin::GetAuthor() { return "umitc18"; }
 const char *SAWHPlugin::GetName() { return "CS2 Simple Anti Wallhack"; }
 const char *SAWHPlugin::GetDescription() { return "Grid based visibility checker"; }
 const char *SAWHPlugin::GetURL() { return ""; }
-const char *SAWHPlugin::GetLicense() { return "GPL"; }
-const char *SAWHPlugin::GetVersion() { return "0.1.0"; }
+const char *SAWHPlugin::GetLicense() { return "MIT"; }
+const char *SAWHPlugin::GetVersion() { return "0.2.0"; }
 const char *SAWHPlugin::GetDate() { return __DATE__; }
 const char *SAWHPlugin::GetLogTag() { return "SAWH"; }

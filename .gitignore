@@ -59,3 +59,5 @@ deps/
 # Env just for me
 
 ambuild-env/
+benchmark.cpp
+benchmark
