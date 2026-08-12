@@ -65,6 +65,9 @@ You need the following tools and dependencies:
 5. If successful, the compiled binary `sawh.so` will be located in the `build/package/addons/sawh` directory.
 
 ## Map Visualizer & Editor
+
+![preview](https://github.com/umitc18/sawh/blob/main/assets/visualizer.png)
+
 The repository includes a highly optimized Python-based visualizer and map editor. You can use it to generate `.bin` visibility files from map radar images and manually edit the solid walls.
 
 ### Prerequisites for Visualizer
