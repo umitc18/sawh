@@ -7,6 +7,13 @@
 #include <unordered_map>
 #include <string>
 
+#pragma pack(push, 1)
+struct QuadNode {
+    uint16_t x, y, w, h;
+    uint8_t is_solid;
+};
+#pragma pack(pop)
+
 class SAWHPlugin : public ISmmPlugin, public IMetamodListener
 {
 public:
@@ -27,6 +34,7 @@ public:
 
 private:
 	void LoadMapData(const std::string& mapName);
+	int GetNodeIdAt(int grid_x, int grid_y);
 	bool IsVisible(int observer_x, int observer_y, int target_x, int target_y);
 	void Hook_CheckTransmit(CCheckTransmitInfo **pInfoInfoList, int nInfoCount, CBitVec<16384> &unionTransmitEdicts, CBitVec<16384> &something, const Entity2Networkable_t **pNetworkables, const uint16 *pEntityIndicies, int nEntityIndices);
 
@@ -37,7 +45,9 @@ private:
 	int map_width = 32;
 	int map_height = 32;
 
-	std::vector<bool> visibility_grid;
+	uint32_t num_nodes = 0;
+	std::vector<QuadNode> quad_nodes;
+	std::vector<uint8_t> visibility_grid;
 };
 
 extern SAWHPlugin g_SAWHPlugin;

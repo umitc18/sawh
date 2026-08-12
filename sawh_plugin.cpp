@@ -1,17 +1,10 @@
 #include "sawh_plugin.h"
-#define JSON_NOEXCEPTION
-#include "json.hpp"
 #include <fstream>
 #include <cmath>
 
 #include "schema_helper.hpp"
 #include <entity2/entitysystem.h>
 #include <mathlib/vector.h>
-
-#include <mathlib/vector.h>
-
-using json = nlohmann::json;
-
 void* g_pGameResourceService = nullptr;
 ISource2GameEntities *g_pServerGameEnts = nullptr;
 IServerGameClients *g_pServerGameClients = nullptr;
@@ -231,73 +224,71 @@ void SAWHPlugin::LoadMapData(const std::string& mapName)
 	char configDir[256];
 	g_SMAPI->PathFormat(configDir, sizeof(configDir), "%s/addons/sawh/configs", g_SMAPI->GetBaseDir());
 
-	char filePath[512];
-	g_SMAPI->PathFormat(filePath, sizeof(filePath), "%s/%s.json", configDir, mapName.c_str());
+	char binPath[512];
+	g_SMAPI->PathFormat(binPath, sizeof(binPath), "%s/%s.bin", configDir, mapName.c_str());
 
-	META_CONPRINTF("[SAWH] Config Dir: %s\n", configDir);
-	META_CONPRINTF("[SAWH] Loading Map Data: %s\n", filePath);
-
-	std::ifstream f(filePath);
-	if (!f.is_open())
+	std::ifstream binFile(binPath, std::ios::binary);
+	if (!binFile.is_open())
 	{
-		META_CONPRINTF("[SAWH] Could not open map data: %s\n", filePath);
+		META_CONPRINTF("[SAWH] Could not open map data: %s\n", binPath);
 		return;
 	}
 
-	json data = json::parse(f, nullptr, false);
-	if (data.is_discarded())
+	META_CONPRINTF("[SAWH] Loading map data: %s\n", binPath);
+	
+	char signature[4];
+	binFile.read(signature, 4);
+	if (strncmp(signature, "SAWH", 4) != 0)
 	{
-		META_CONPRINTF("[SAWH] JSON parse error in %s\n", filePath);
+		META_CONPRINTF("[SAWH] Invalid header! File may be corrupt.\n");
 		return;
 	}
 
-	if (!data.contains("map_name") || data["map_name"] != mapName)
-	{
-		META_CONPRINTF("[SAWH] Map name mismatch in JSON data.\n");
-		return;
-	}
+	uint32_t version;
+	binFile.read(reinterpret_cast<char*>(&version), sizeof(version));
+	
+	// for future
+	if (version < 2) {
+        META_CONPRINTF("[SAWH] Unsupported binary version (%d). Please regenerate map with new generator.\n", version);
+        return;
+    }
+
+	uint32_t width, height;
+	binFile.read(reinterpret_cast<char*>(&width), sizeof(width));
+	binFile.read(reinterpret_cast<char*>(&height), sizeof(height));
+	
+	float rx, ry, rs;
+	binFile.read(reinterpret_cast<char*>(&rx), sizeof(rx));
+	binFile.read(reinterpret_cast<char*>(&ry), sizeof(ry));
+	binFile.read(reinterpret_cast<char*>(&rs), sizeof(rs));
+
+    uint32_t nodes_count;
+    binFile.read(reinterpret_cast<char*>(&nodes_count), sizeof(nodes_count));
 
 	current_map = mapName;
-	world_min_x = data.value("world_min_x", 0.0f);
-	world_min_y = data.value("world_min_y", 0.0f);
-	cell_size = data.value("cell_size", 4.4f);
-	map_width = data.value("width", 32);
-	map_height = data.value("height", 32);
+	map_width = width;
+	map_height = height;
+	world_min_x = rx;
+	world_min_y = ry;
+	cell_size = rs;
+    num_nodes = nodes_count;
 
-	visibility_grid.clear();
+    quad_nodes.resize(num_nodes);
+    binFile.read(reinterpret_cast<char*>(quad_nodes.data()), num_nodes * sizeof(QuadNode));
 
-	int total_cells = map_width * map_height;
-	visibility_grid.assign(total_cells * total_cells, false);
-
-	if (data.contains("zones"))
-	{
-		for (const auto& zone : data["zones"])
-		{
-			int zx = zone.value("x", 0);
-			int zy = zone.value("y", 0);
-			
-			if (zx < 0 || zx >= map_width || zy < 0 || zy >= map_height) continue;
-			int obs_index = zy * map_width + zx;
-
-			if (zone.contains("cansee"))
-			{
-				for (const auto& see : zone["cansee"])
-				{
-					int sx = see.value("x", 0);
-					int sy = see.value("y", 0);
-					
-					if (sx < 0 || sx >= map_width || sy < 0 || sy >= map_height) continue;
-					
-					int tgt_index = sy * map_width + sx;
-					int global_index = obs_index * total_cells + tgt_index;
-					
-					visibility_grid[global_index] = true;
-				}
-			}
-		}
+	int total_bits = num_nodes * num_nodes;
+	int num_bytes = (total_bits + 7) / 8;
+	
+	std::vector<uint8_t> buffer(num_bytes);
+	binFile.read(reinterpret_cast<char*>(buffer.data()), num_bytes);
+	
+	visibility_grid.assign(total_bits, false);
+	for (int i = 0; i < total_bits; ++i) {
+		visibility_grid[i] = (buffer[i / 8] & (1 << (i % 8))) != 0;
 	}
-
-	META_CONPRINTF("[SAWH] Successfully loaded visibility data for %s\n", mapName.c_str());
+	
+	float memory_mb = static_cast<float>(total_bits) / 8.0f / 1024.0f / 1024.0f;
+	META_CONPRINTF("[SAWH] Loaded data for %s (Nodes: %d, RAM: %.2f MB)\n", mapName.c_str(), num_nodes, memory_mb);
 }
 
 void SAWHPlugin::CalculateGrid(float x, float y, int& grid_x, int& grid_y)
@@ -322,23 +313,37 @@ void SAWHPlugin::CalculateGrid(float x, float y, int& grid_x, int& grid_y)
 	grid_y = static_cast<int>(std::floor(image_y / pixels_per_cell_y));
 }
 
+int SAWHPlugin::GetNodeIdAt(int grid_x, int grid_y)
+{
+    if (grid_x < 0 || grid_x >= map_width || grid_y < 0 || grid_y >= map_height)
+        return -1;
+        
+    for (uint32_t i = 0; i < num_nodes; ++i) {
+        const QuadNode& n = quad_nodes[i];
+        if (grid_x >= n.x && grid_x < n.x + n.w && grid_y >= n.y && grid_y < n.y + n.h) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 bool SAWHPlugin::IsVisible(int observer_x, int observer_y, int target_x, int target_y)
 {
-	if (observer_x < 0 || observer_x >= map_width || observer_y < 0 || observer_y >= map_height ||
-	    target_x < 0 || target_x >= map_width || target_y < 0 || target_y >= map_height)
-	{
-		return false;
-	}
-
+    int obs_node = GetNodeIdAt(observer_x, observer_y);
+    int tgt_node = GetNodeIdAt(target_x, target_y);
+    
+    if (obs_node == -1 || tgt_node == -1) return false;
+    
+    if (quad_nodes[obs_node].is_solid || quad_nodes[tgt_node].is_solid) {
+        return false;
+    }
+    
 	if (visibility_grid.empty())
 	{
 		return false;
 	}
 
-	int total_cells = map_width * map_height;
-	int obs_index = observer_y * map_width + observer_x;
-	int tgt_index = target_y * map_width + target_x;
-	int global_index = obs_index * total_cells + tgt_index;
+	int global_index = obs_node * num_nodes + tgt_node;
 
 	if (global_index >= 0 && global_index < visibility_grid.size())
 	{
