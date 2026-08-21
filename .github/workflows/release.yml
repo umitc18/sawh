@@ -1,0 +1,63 @@
+name: Build and Release SAWH
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Linux Binary & Package
+    runs-on: ubuntu-22.04
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Build Dependencies (AMBuild)
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install git+https://github.com/alliedmodders/ambuild
+
+    - name: Setup Metamod and HL2SDK Dependencies
+      run: |
+        mkdir deps
+        cd deps
+        git clone https://github.com/alliedmodders/metamod-source.git
+        git clone https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2 -b cs2
+        git clone https://github.com/alliedmodders/hl2sdk-manifests.git
+        cd ..
+
+    - name: Configure AMBuild
+      run: |
+        mkdir build
+        cd build
+        python3 ../configure.py --mms_path=../deps/metamod-source --hl2sdk-root=../deps --hl2sdk-manifests=../deps/hl2sdk-manifests --sdks=cs2
+
+    - name: Compile Plugin
+      run: |
+        cd build
+        ambuild
+
+    - name: Prepare Release Package Structure
+      run: |
+        mkdir -p build/package/cs2/addons/sawh/configs
+        
+        cd build/package/cs2/
+        zip -r ../../../sawh-linux.zip addons
+
+    - name: Create GitHub Release and Upload Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: sawh-linux.zip
+        generate_release_notes: true
